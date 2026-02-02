@@ -1,11 +1,21 @@
 
 import React, { useState } from 'react';
-import { Contact } from '../types.ts';
+import { Contact, UserRole } from '../types.ts';
 import Modal from '../components/Modal.tsx';
 import { useData } from '../DataContext.tsx';
 
 const ContactsPage: React.FC = () => {
-  const { contacts, projects, addContact, updateContact, deleteContact } = useData();
+  const { contacts, projects, addContact, updateContact, deleteContact, currentUser } = useData();
+    const isSysAdmin = currentUser?.role === UserRole.SYS_ADMIN;
+    const isPmAdmin = currentUser?.role === UserRole.PM_ADMIN;
+    const canManageContacts = isSysAdmin || isPmAdmin;
+    const pmProjectIds = currentUser?.accessibleProjects || [];
+
+    const contactMatchesPmProjects = (contact: Contact) => {
+      const ids = contact.projectIds?.length ? contact.projectIds : (contact.projectId ? [contact.projectId] : []);
+      if (ids.includes('all')) return true;
+      return ids.some(id => pmProjectIds.includes(id));
+    };
   const [isModalOpen, setModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [search, setSearch] = useState('');
@@ -16,16 +26,20 @@ const ContactsPage: React.FC = () => {
   );
 
   const handleOpenNew = () => {
+    if (!canManageContacts) return;
     setEditingContact(null);
     setModalOpen(true);
   };
 
   const handleOpenEdit = (c: Contact) => {
+    if (!canManageContacts) return;
+    if (isPmAdmin && !contactMatchesPmProjects(c)) return;
     setEditingContact(c);
     setModalOpen(true);
   };
 
   const handleDelete = (id: string) => {
+    if (!canManageContacts) return;
     if (confirm('האם אתה בטוח שברצונך למחוק איש קשר זה?')) {
       deleteContact(id);
     }
@@ -34,12 +48,18 @@ const ContactsPage: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget as HTMLFormElement);
+    const projectIds = Array.from(formData.getAll('projectIds') as string[]);
+    const normalizedProjectIds = projectIds.includes('all') ? ['all'] : projectIds.filter(Boolean);
+    const limitedProjectIds = isPmAdmin
+      ? normalizedProjectIds.filter(id => id === 'all' || pmProjectIds.includes(id))
+      : normalizedProjectIds;
     const data: Partial<Contact> = {
       name: formData.get('name') as string,
       email: formData.get('email') as string,
       phone: formData.get('phone') as string,
       title: formData.get('title') as string,
-      projectId: formData.get('projectId') as string,
+      projectIds: limitedProjectIds,
+      projectId: limitedProjectIds.includes('all') ? 'all' : (limitedProjectIds[0] || ''),
       notes: formData.get('notes') as string,
     };
 
@@ -63,7 +83,9 @@ const ContactsPage: React.FC = () => {
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">ניהול אנשי קשר</h1>
           <p className="text-slate-500 font-medium">אנשי קשר רלוונטיים בפרויקטים ובארגונים</p>
         </div>
-        <button onClick={handleOpenNew} className="bg-blue-600 text-white px-8 py-3 rounded-2xl font-black shadow-lg hover:bg-blue-700 transition-all">+ איש קשר חדש</button>
+        {canManageContacts && (
+          <button onClick={handleOpenNew} className="bg-blue-600 text-white px-8 py-3 rounded-2xl font-black shadow-lg hover:bg-blue-700 transition-all">+ איש קשר חדש</button>
+        )}
       </div>
 
       <div className="bg-white p-4 rounded-2xl border shadow-sm flex items-center">
@@ -84,12 +106,16 @@ const ContactsPage: React.FC = () => {
                 {contact.name.charAt(0)}
               </div>
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => handleOpenEdit(contact)} className="p-1.5 text-slate-400 hover:text-blue-600 bg-slate-50 rounded-lg">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-                </button>
-                <button onClick={() => handleDelete(contact.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-slate-50 rounded-lg">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                </button>
+                {canManageContacts && (!isPmAdmin || contactMatchesPmProjects(contact)) && (
+                  <button onClick={() => handleOpenEdit(contact)} className="p-1.5 text-slate-400 hover:text-blue-600 bg-slate-50 rounded-lg">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                  </button>
+                )}
+                {canManageContacts && (!isPmAdmin || contactMatchesPmProjects(contact)) && (
+                  <button onClick={() => handleDelete(contact.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-slate-50 rounded-lg">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                  </button>
+                )}
               </div>
             </div>
             <h3 className="font-black text-slate-900 leading-tight">{contact.name}</h3>
@@ -107,7 +133,12 @@ const ContactsPage: React.FC = () => {
             </div>
             
             <div className="pt-4 border-t border-slate-50 text-[9px] font-black text-slate-400">
-              פרויקט: {contact.projectId === 'all' ? 'כל הפרויקטים' : (projects.find(p => p.id === contact.projectId)?.name || 'ללא שיוך')}
+              פרויקטים: {(() => {
+                const ids = contact.projectIds?.length ? contact.projectIds : (contact.projectId ? [contact.projectId] : []);
+                if (ids.includes('all')) return 'כל הפרויקטים';
+                if (!ids.length) return 'ללא שיוך';
+                return ids.map(id => projects.find(p => p.id === id)?.name || 'ללא שיוך').join(', ');
+              })()}
             </div>
           </div>
         ))}
@@ -132,14 +163,34 @@ const ContactsPage: React.FC = () => {
               <label className="text-xs font-black text-slate-400 uppercase tracking-widest text-left" dir="ltr">טלפון *</label>
               <input name="phone" required defaultValue={editingContact?.phone} type="tel" className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none text-left" dir="ltr" />
             </div>
-            <div className="md:col-span-2 space-y-1">
-              <label className="text-xs font-black text-slate-400 uppercase tracking-widest">פרויקט משויך</label>
-              <select name="projectId" defaultValue={editingContact?.projectId} className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none">
-                <option value="">בחר פרויקט...</option>
-                <option value="all">כל הפרויקטים</option>
-                {projects.filter(p => !p.isDeleted).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-              <p className="text-[10px] text-slate-400 font-bold">בחירה ב"כל הפרויקטים" תאפשר להשתמש באיש הקשר בכל המשימות מכל הפרויקטים.</p>
+            <div className="md:col-span-2 space-y-2">
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest">שיוך לפרויקטים</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-y-auto bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <label className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-100 hover:border-blue-200 hover:bg-blue-50 transition-colors cursor-pointer">
+                  <input
+                    type="checkbox"
+                    name="projectIds"
+                    value="all"
+                    defaultChecked={editingContact?.projectIds?.includes('all') || editingContact?.projectId === 'all'}
+                    className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-slate-700 flex-1">כל הפרויקטים</span>
+                </label>
+                {projects.filter(p => !p.isDeleted && (!isPmAdmin || pmProjectIds.includes(p.id))).map(p => (
+                  <label key={p.id} className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-100 hover:border-blue-200 hover:bg-blue-50 transition-colors cursor-pointer">
+                    <input
+                      type="checkbox"
+                      name="projectIds"
+                      value={p.id}
+                      defaultChecked={editingContact?.projectIds?.includes(p.id) || editingContact?.projectId === p.id}
+                      className="w-4 h-4 text-blue-600 rounded cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-slate-700 flex-1">{p.name}</span>
+                  </label>
+                ))}
+                {projects.filter(p => !p.isDeleted).length === 0 && <p className="text-xs text-slate-400 italic col-span-2">אין פרויקטים להצגה</p>}
+              </div>
+              <p className="text-[10px] text-slate-400 font-bold">אפשר לבחור יותר מפרויקט אחד.</p>
             </div>
             <div className="md:col-span-2 space-y-1">
               <label className="text-xs font-black text-slate-400 uppercase tracking-widest">הערות</label>

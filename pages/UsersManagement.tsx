@@ -13,7 +13,11 @@ const UsersManagementPage: React.FC = () => {
   const [filterRole, setFilterRole] = useState<UserRole | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
 
-  const isAdmin = currentUser?.role === UserRole.SYS_ADMIN;
+  const isSysAdmin = currentUser?.role === UserRole.SYS_ADMIN;
+  const isPmAdmin = currentUser?.role === UserRole.PM_ADMIN;
+  const canManageUsers = isSysAdmin || isPmAdmin;
+  const canDeleteUsers = isSysAdmin;
+  const pmProjectIds = currentUser?.accessibleProjects || [];
 
   const filteredUsers = useMemo(() => {
     return users.filter(u => {
@@ -35,25 +39,31 @@ const UsersManagementPage: React.FC = () => {
   }, [users]);
 
   const handleOpenNew = () => {
+    if (!canManageUsers) return;
     setEditingUser(null);
     setModalOpen(true);
   };
 
   const handleOpenEdit = (user: User) => {
+    if (!canManageUsers) return;
     setEditingUser(user);
     setModalOpen(true);
   };
 
   const handleDelete = (id: string) => {
+    if (!canDeleteUsers) return;
     if (confirm('האם אתה בטוח שברצונך למחוק משתמש זה?')) {
       deleteUser(id);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget as HTMLFormElement);
     const accessibleProjects = Array.from(formData.getAll('accessibleProjects') as string[]);
+    const limitedAccessibleProjects = isPmAdmin
+      ? accessibleProjects.filter(id => pmProjectIds.includes(id))
+      : accessibleProjects;
     const password = formData.get('password') as string;
     const passwordConfirm = formData.get('passwordConfirm') as string;
     
@@ -79,13 +89,12 @@ const UsersManagementPage: React.FC = () => {
       email: formData.get('email') as string,
       role: formData.get('role') as UserRole,
       active: formData.get('active') === 'true',
-      accessibleProjects: accessibleProjects,
+      accessibleProjects: limitedAccessibleProjects,
     };
 
-    // Hash password if provided
+    // Store password exactly as entered
     if (password) {
-      const hashedPassword = await hashPassword(password);
-      data.password = hashedPassword;
+      data.password = password;
     }
 
     if (editingUser) {
@@ -99,16 +108,6 @@ const UsersManagementPage: React.FC = () => {
       addUser(newUser);
     }
     setModalOpen(false);
-  };
-
-  // Simple password hashing function using SHA-256
-  const hashPassword = async (password: string): Promise<string> => {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(password);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    return hashHex;
   };
 
   const getRoleColor = (role: UserRole): string => {
@@ -138,7 +137,9 @@ const UsersManagementPage: React.FC = () => {
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">ניהול משתמשים והרשאות</h1>
           <p className="text-slate-500 font-medium">אימות, הרשאות וניהול גישה לפרויקטים</p>
         </div>
-        <button onClick={handleOpenNew} className="bg-blue-600 text-white px-8 py-2.5 rounded-2xl font-black shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all">+ משתמש חדש</button>
+        {canManageUsers && (
+          <button onClick={handleOpenNew} className="bg-blue-600 text-white px-8 py-2.5 rounded-2xl font-black shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all">+ משתמש חדש</button>
+        )}
       </div>
 
       {/* Stats */}
@@ -267,12 +268,12 @@ const UsersManagementPage: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 text-left">
                       <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                        {isAdmin && (
+                        {canManageUsers && (
                           <>
                             <button onClick={() => handleOpenEdit(u)} title="ערוך משתמש" className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 bg-white rounded-lg border border-slate-200 transition-colors">
                               ✏️
                             </button>
-                            {currentUser?.id !== u.id && (
+                            {canDeleteUsers && currentUser?.id !== u.id && (
                               <button onClick={() => handleDelete(u.id)} title="מחק משתמש" className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 bg-white rounded-lg border border-slate-200 transition-colors">
                                 🗑️
                               </button>
@@ -352,7 +353,7 @@ const UsersManagementPage: React.FC = () => {
             <div className="space-y-3 pt-6 border-t">
               <label className="text-xs font-black text-slate-400 uppercase tracking-widest">פרויקטים מורשים לצפייה ועריכה</label>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-y-auto bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                {projects.filter(p => !p.isDeleted).map(p => (
+                {projects.filter(p => !p.isDeleted && (!isPmAdmin || pmProjectIds.includes(p.id))).map(p => (
                   <label key={p.id} className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-100 hover:border-blue-200 hover:bg-blue-50 transition-colors cursor-pointer">
                     <input 
                       type="checkbox" 

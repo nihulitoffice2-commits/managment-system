@@ -21,7 +21,7 @@ interface DataContextType {
   addProject: (p: Project) => Promise<string | void>;
   updateProject: (id: string, p: Partial<Project>) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
-  addTask: (t: Task) => Promise<void>;
+  addTask: (t: Task) => Promise<string | void>;
   updateTask: (id: string, t: Partial<Task>) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
   addPayment: (p: Payment) => Promise<void>;
@@ -131,18 +131,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode, currentUser: Us
   // Filter projects by user access
   const filteredProjects = useMemo(() => {
     if (!currentUser) return [];
-    
-    // Check if admin - handle both enum and string values
-    const isAdmin = currentUser.role === UserRole.SYS_ADMIN || 
-                    currentUser.role === 'SYS_ADMIN' ||
-                    currentUser.role === 'sys_admin';
-    
-    // If admin or role contains admin, return all projects
-    if (isAdmin || (typeof currentUser.role === 'string' && currentUser.role.toUpperCase().includes('ADMIN'))) {
+
+    const isSysAdmin = currentUser.role === UserRole.SYS_ADMIN ||
+      currentUser.role === 'SYS_ADMIN' ||
+      currentUser.role === 'sys_admin';
+
+    if (isSysAdmin) {
       return projects.filter(p => !p.isDeleted);
     }
-    
-    // Otherwise filter by accessible projects
+
     return projects.filter(p => !p.isDeleted && currentUser.accessibleProjects?.includes(p.id));
   }, [projects, currentUser]);
 
@@ -151,6 +148,28 @@ export const DataProvider: React.FC<{ children: React.ReactNode, currentUser: Us
     const projectIds = filteredProjects.map(p => p.id);
     return tasks.filter(t => projectIds.includes(t.projectId));
   }, [tasks, filteredProjects, currentUser]);
+
+  const filteredPayments = useMemo(() => {
+    if (!currentUser) return [];
+    const projectIds = filteredProjects.map(p => p.id);
+    return payments.filter(p => projectIds.includes(p.projectId));
+  }, [payments, filteredProjects, currentUser]);
+
+  const filteredContacts = useMemo(() => {
+    if (!currentUser) return [];
+    const projectIds = filteredProjects.map(p => p.id);
+    return contacts.filter(c => {
+      const ids = c.projectIds?.length ? c.projectIds : (c.projectId ? [c.projectId] : []);
+      if (ids.includes('all')) return true;
+      return ids.some(id => projectIds.includes(id));
+    });
+  }, [contacts, filteredProjects, currentUser]);
+
+  const filteredMeetings = useMemo(() => {
+    if (!currentUser) return [];
+    const projectIds = filteredProjects.map(p => p.id);
+    return meetings.filter(m => !m.projectId || projectIds.includes(m.projectId));
+  }, [meetings, filteredProjects, currentUser]);
 
   // Login function
   const login = async (email: string, password: string): Promise<User | null> => {
@@ -288,15 +307,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode, currentUser: Us
     }
   };
   
-  const addTask = async (t: Task) => {
+  const addTask = async (t: Task): Promise<string | void> => {
     try {
       setSaving(true);
       const { id, ...taskData } = t;
       const docRef = await addDoc(collection(db, 'tasks'), taskData);
       setTasks(prev => [...prev, { ...taskData, id: docRef.id } as Task]);
+      return docRef.id;
     } catch (error) {
       console.error('Error adding task to Firebase:', error);
       setTasks(prev => [...prev, t]);
+      return undefined;
     } finally {
       setSaving(false);
     }
@@ -579,7 +600,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode, currentUser: Us
 
   return (
     <DataContext.Provider value={{ 
-      currentUser, projects: filteredProjects, tasks: filteredTasks, payments, users, contacts, meetings, loading, saving,
+      currentUser, projects: filteredProjects, tasks: filteredTasks, payments: filteredPayments, users, contacts: filteredContacts, meetings: filteredMeetings, loading, saving,
        login, logout,
       addProject, updateProject, deleteProject,
       addTask, updateTask, deleteTask,

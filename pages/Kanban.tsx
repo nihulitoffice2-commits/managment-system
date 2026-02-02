@@ -1,11 +1,30 @@
 
 import React, { useMemo, useState } from 'react';
-import { TaskStatus, TaskPriority, ProjectStatus } from '../types.ts';
+import { TaskStatus, TaskPriority, ProjectStatus, TaskItemType, UserRole, Task } from '../types.ts';
 import { useData } from '../DataContext.tsx';
 import Modal from '../components/Modal.tsx';
 
 const KanbanPage: React.FC = () => {
-  const { tasks, projects, updateTask: originalUpdateTask } = useData();
+  const { tasks, projects, contacts, currentUser, updateTask: originalUpdateTask } = useData();
+    const isSysAdmin = currentUser?.role === UserRole.SYS_ADMIN;
+    const isPmAdmin = currentUser?.role === UserRole.PM_ADMIN;
+    const isWorker = currentUser?.role === UserRole.WORKER;
+
+    const isTaskRelatedToUser = (task: Task) => {
+      if (!currentUser) return false;
+      if (task.assignees?.includes(currentUser.id)) return true;
+      if (task.performerContactId) {
+        const contact = contacts.find(c => c.id === task.performerContactId);
+        if (contact?.email && contact.email === currentUser.email) return true;
+      }
+      return false;
+    };
+
+    const canEditTask = (task: Task) => {
+      if (isSysAdmin || isPmAdmin) return true;
+      if (isWorker) return isTaskRelatedToUser(task);
+      return false;
+    };
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [view, setView] = useState<'all' | 'overdue'>('all');
@@ -67,6 +86,7 @@ const KanbanPage: React.FC = () => {
     const base = tasks.filter(t => {
       const p = projects.find(proj => proj.id === t.projectId);
       if (!p || p.isDeleted) return false;
+      if (t.itemType === TaskItemType.SUB_TASK) return false;
       if (selectedProjects.length > 0 && !selectedProjects.includes(t.projectId)) return false;
       if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
       return true;
@@ -138,8 +158,9 @@ const KanbanPage: React.FC = () => {
                 const taskIsLateToStart = isLateToStart(task);
                 const taskIsLateToFinish = isLateToFinish(task);
                 const taskIsLate = taskIsLateToStart || taskIsLateToFinish;
+                const projectColor = projects.find(p => p.id === task.projectId)?.color || '#cbd5e1';
                 return (
-                <div key={task.id} onClick={() => { setSelectedTask(task); setDetailModalOpen(true); }} className={`p-5 rounded-2xl shadow-sm border hover:shadow-md transition-all group cursor-pointer ${
+                <div key={task.id} onClick={() => { setSelectedTask(task); setDetailModalOpen(true); }} style={{ borderRight: `4px solid ${projectColor}` }} className={`p-5 rounded-2xl shadow-sm border hover:shadow-md transition-all group cursor-pointer ${
                   taskIsLate ? 'bg-orange-50 border-orange-200' : 'bg-white border-slate-200'
                 }`}>
                   <div className="flex justify-between items-start mb-3">
@@ -157,16 +178,16 @@ const KanbanPage: React.FC = () => {
                   {taskIsLateToStart && <p className="text-xs text-orange-600 font-bold mb-2">🕐 היה אמור להתחיל: {task.plannedStartDate}</p>}
                   {taskIsLateToFinish && !taskIsLateToStart && <p className="text-xs text-orange-600 font-bold mb-2">📅 היה אמור להסתיים: {task.plannedEndDate}</p>}
                   <div className="flex justify-between items-center pt-3 border-t border-slate-50">
-                    <span className="text-[10px] font-bold text-slate-400 truncate max-w-[150px]">
+                    <span className="text-[10px] font-bold truncate max-w-[150px]" style={{ color: projectColor }}>
                       {projects.find(p => p.id === task.projectId)?.name}
                     </span>
                     <div className="flex gap-1">
                        {columns.filter(c => c.id !== col.id).map(c => (
                          <button 
-                            key={c.id} 
-                            onClick={(e) => { e.stopPropagation(); updateTask(task.id, { status: c.id as TaskStatus }); }}
-                            className="w-5 h-5 rounded-full border border-slate-200 text-[8px] flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all"
-                            title={`העבר ל-${c.title}`}
+                           key={c.id} 
+                           onClick={(e) => { if (!canEditTask(task)) return; e.stopPropagation(); updateTask(task.id, { status: c.id as TaskStatus }); }}
+                           className={`w-5 h-5 rounded-full border border-slate-200 text-[8px] flex items-center justify-center transition-all ${canEditTask(task) ? 'hover:bg-blue-600 hover:text-white' : 'opacity-50 cursor-not-allowed'}`}
+                           title={`העבר ל-${c.title}`}
                          >
                            {c.title.charAt(0)}
                          </button>

@@ -9,7 +9,7 @@ import { ICONS } from '../constants.tsx';
 
 const ProjectsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { projects, tasks, users, contacts, loading, saving, addProject, updateProject, deleteProject, addContact, updateContact, deleteContact } = useData();
+  const { projects, tasks, users, contacts, loading, saving, addProject, updateProject, deleteProject, addContact, updateContact, deleteContact, currentUser } = useData();
   const [filter, setFilter] = useState('');
   const [viewTab, setViewTab] = useState<'active' | 'completed' | 'all'>('active');
   const [isModalOpen, setModalOpen] = useState(false);
@@ -20,6 +20,10 @@ const ProjectsPage: React.FC = () => {
   const [addContactFormData, setAddContactFormData] = useState({ name: '', phone: '', email: '', title: '' });
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedProjectDetail, setSelectedProjectDetail] = useState<Project | null>(null);
+  const [orgManagerContactId, setOrgManagerContactId] = useState('');
+  const [orgManagerName, setOrgManagerName] = useState('');
+  const [orgManagerPhone, setOrgManagerPhone] = useState('');
+  const [orgManagerEmail, setOrgManagerEmail] = useState('');
   
   const getStatusColorClasses = (status: ProjectStatus): string => {
     switch (status) {
@@ -45,11 +49,58 @@ const ProjectsPage: React.FC = () => {
       return matchesSearch && matchesTab;
     });
   }, [projects, filter, viewTab]);
-  const handleOpenNew = () => { setEditingProject(null); setModalOpen(true); };
+  const isSysAdmin = currentUser?.role === UserRole.SYS_ADMIN;
+  const isPmAdmin = currentUser?.role === UserRole.PM_ADMIN;
+  const canCreateProject = isSysAdmin || isPmAdmin;
+  const canEditProject = (project: Project) => {
+    if (isSysAdmin) return true;
+    if (isPmAdmin) return (currentUser?.accessibleProjects || []).includes(project.id);
+    return false;
+  };
+
+  const handleOpenNew = () => {
+    if (!canCreateProject) return;
+    setEditingProject(null);
+    setOrgManagerContactId('');
+    setOrgManagerName('');
+    setOrgManagerPhone('');
+    setOrgManagerEmail('');
+    setModalOpen(true);
+  };
   // when opening new project modal, prepare a temporary id for contacts
-  const handleOpenNewWithTemp = () => { setEditingProject(null); const tmp = `tmp-${Date.now()}`; setTempProjectId(tmp); setModalOpen(true); };
-  const handleOpenEdit = (project: Project) => { setEditingProject(project); setModalOpen(true); };
-  const handleDelete = (id: string) => { if (confirm('האם אתה בטוח שברצונך למחוק פרויקט זה?')) deleteProject(id); };
+  const handleOpenNewWithTemp = () => {
+    if (!canCreateProject) return;
+    setEditingProject(null);
+    setOrgManagerContactId('');
+    setOrgManagerName('');
+    setOrgManagerPhone('');
+    setOrgManagerEmail('');
+    const tmp = `tmp-${Date.now()}`;
+    setTempProjectId(tmp);
+    setModalOpen(true);
+  };
+  const handleOpenEdit = (project: Project) => {
+    if (!canEditProject(project)) return;
+    setEditingProject(project);
+    setOrgManagerName(project.orgManagerName || '');
+    setOrgManagerPhone(project.orgManagerPhone || '');
+    setOrgManagerEmail(project.orgManagerEmail || '');
+    const matched = contacts.find(c => {
+      const ids = c.projectIds?.length ? c.projectIds : (c.projectId ? [c.projectId] : []);
+      const inProject = ids.includes('all') || ids.includes(project.id);
+      return inProject && (
+        (project.orgManagerEmail && c.email === project.orgManagerEmail) ||
+        (project.orgManagerPhone && c.phone === project.orgManagerPhone) ||
+        (project.orgManagerName && c.name === project.orgManagerName)
+      );
+    }) || contacts.find(c => project.orgManagerEmail && c.email === project.orgManagerEmail);
+    setOrgManagerContactId(matched?.id || '');
+    setModalOpen(true);
+  };
+  const handleDelete = (id: string) => {
+    if (!canEditProject({ id } as Project)) return;
+    if (confirm('האם אתה בטוח שברצונך למחוק פרויקט זה?')) deleteProject(id);
+  };
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget as HTMLFormElement);
@@ -64,9 +115,9 @@ const ProjectsPage: React.FC = () => {
       projectTotalCost: Number(formData.get('projectTotalCost')),
       projectPaidAmount: Number(formData.get('projectPaidAmount')),
       color: formData.get('color') as string,
-      orgManagerName: formData.get('orgManagerName') as string,
-      orgManagerPhone: formData.get('orgManagerPhone') as string,
-      orgManagerEmail: formData.get('orgManagerEmail') as string,
+      orgManagerName: orgManagerName,
+      orgManagerPhone: orgManagerPhone,
+      orgManagerEmail: orgManagerEmail,
       projectNotes: formData.get('projectNotes') as string,
     };
     if (editingProject) updateProject(editingProject.id, data);
@@ -80,12 +131,62 @@ const ProjectsPage: React.FC = () => {
         contacts.filter(c => c.projectId === tempProjectId).forEach(c => updateContact(c.id, { projectId: createdId }));
       }
       setTempProjectId(null);
+
+      const managerHasData = orgManagerName || orgManagerPhone || orgManagerEmail;
+      if (managerHasData) {
+        const projectIdForContact = createdId || idToUse;
+        const contactPayload = {
+          name: orgManagerName || 'מנהל עמותה',
+          phone: orgManagerPhone || '',
+          email: orgManagerEmail || '',
+          title: 'מנהל עמותה',
+          projectId: projectIdForContact,
+          projectIds: [projectIdForContact],
+          organizationId: 'org_client_1'
+        };
+
+        if (orgManagerContactId) {
+          const existing = contacts.find(c => c.id === orgManagerContactId);
+          const existingIds = existing?.projectIds?.length ? existing.projectIds : (existing?.projectId ? [existing.projectId] : []);
+          const mergedIds = Array.from(new Set([...(existingIds || []), projectIdForContact]));
+          updateContact(orgManagerContactId, { ...contactPayload, projectIds: mergedIds });
+        } else {
+          addContact({ id: '', ...contactPayload });
+        }
+      }
+    }
+
+    if (editingProject) {
+      const managerHasData = orgManagerName || orgManagerPhone || orgManagerEmail;
+      if (managerHasData) {
+        const contactPayload = {
+          name: orgManagerName || 'מנהל עמותה',
+          phone: orgManagerPhone || '',
+          email: orgManagerEmail || '',
+          title: 'מנהל עמותה',
+          projectId: editingProject.id,
+          projectIds: [editingProject.id],
+          organizationId: editingProject.organizationId
+        };
+        if (orgManagerContactId) {
+          const existing = contacts.find(c => c.id === orgManagerContactId);
+          const existingIds = existing?.projectIds?.length ? existing.projectIds : (existing?.projectId ? [existing.projectId] : []);
+          const mergedIds = Array.from(new Set([...(existingIds || []), editingProject.id]));
+          updateContact(orgManagerContactId, { ...contactPayload, projectIds: mergedIds });
+        } else {
+          addContact({ id: '', ...contactPayload });
+        }
+      }
     }
     setModalOpen(false);
   };
   const projectContacts = useMemo(() => {
     const currentId = editingProject ? editingProject.id : tempProjectId;
-    return currentId ? contacts.filter(c => c.projectId === currentId) : [];
+    if (!currentId) return [];
+    return contacts.filter(c => {
+      const ids = c.projectIds?.length ? c.projectIds : (c.projectId ? [c.projectId] : []);
+      return ids.includes('all') || ids.includes(currentId);
+    });
   }, [contacts, editingProject, tempProjectId]);
   return (
     <div className="space-y-6 text-right" dir="rtl">
@@ -99,7 +200,9 @@ const ProjectsPage: React.FC = () => {
       )}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div><h1 className="text-3xl font-black text-slate-900 tracking-tight">ניהול פרויקטים</h1><p className="text-slate-500 font-medium">מקור אמת מרכזי לכל הפרויקטים והקמפיינים</p></div>
-        <button onClick={handleOpenNewWithTemp} className="bg-blue-600 text-white px-8 py-3 rounded-2xl font-black shadow-lg hover:bg-blue-700 transition-all">+ הקמת פרויקט חדש</button>
+        {canCreateProject && (
+          <button onClick={handleOpenNewWithTemp} className="bg-blue-600 text-white px-8 py-3 rounded-2xl font-black shadow-lg hover:bg-blue-700 transition-all">+ הקמת פרויקט חדש</button>
+        )}
       </div>
       <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-center">
         <div className="flex bg-slate-100 p-1 rounded-2xl w-full md:w-fit">
@@ -114,26 +217,44 @@ const ProjectsPage: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
         {filtered.map((project) => (
           <div key={project.id} onClick={() => navigate(`/project?id=${project.id}`)} className={`bg-white rounded-[2rem] border shadow-sm hover:shadow-xl transition-all overflow-hidden flex flex-col group cursor-pointer ${project.status === ProjectStatus.COMPLETED ? 'border-slate-100 opacity-80' : 'border-slate-200'}`}>
-            <div className="p-8 flex-1 cursor-pointer" onClick={() => { setSelectedProjectDetail(project); setDetailModalOpen(true); }}>
+            <div className="p-8 flex-1">
               <div className="flex justify-between items-start mb-6">
                 <div className="relative">
                   {statusEditId === project.id ? (
-                    <select autoFocus onBlur={() => setStatusEditId(null)} defaultValue={project.status} onChange={(e) => { updateProject(project.id, { status: e.target.value as ProjectStatus }); setStatusEditId(null); }} className="text-[10px] font-black px-3 py-1.5 rounded-xl uppercase bg-white border border-blue-300">
+                    <select autoFocus onClick={(e) => e.stopPropagation()} onBlur={() => setStatusEditId(null)} defaultValue={project.status} onChange={(e) => { updateProject(project.id, { status: e.target.value as ProjectStatus }); setStatusEditId(null); }} className="text-[10px] font-black px-3 py-1.5 rounded-xl uppercase bg-white border border-blue-300">
                       {Object.values(ProjectStatus).map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   ) : (
-                    <button onClick={() => setStatusEditId(project.id)} className={`text-[10px] font-black px-3 py-1.5 rounded-xl uppercase ${getStatusColorClasses(project.status)}`}>{project.status}</button>
+                    <button
+                      onClick={(e) => { if (!canEditProject(project)) return; e.stopPropagation(); setStatusEditId(project.id); }}
+                      className={`text-[10px] font-black px-3 py-1.5 rounded-xl uppercase ${getStatusColorClasses(project.status)} ${canEditProject(project) ? '' : 'cursor-default opacity-70'}`}
+                    >
+                      {project.status}
+                    </button>
                   )}
                 </div>
-                <div className="flex gap-2"><button onClick={() => handleOpenEdit(project)} className="p-2 text-slate-400 hover:text-blue-600 bg-slate-50 rounded-xl transition-all"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button>
-                  <button onClick={() => handleDelete(project.id)} className="p-2 text-slate-400 hover:text-rose-600 bg-slate-50 rounded-xl transition-all"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div>
+                <div className="flex gap-2">
+                  {canEditProject(project) && (
+                    <button onClick={(e) => { e.stopPropagation(); handleOpenEdit(project); }} className="p-2 text-slate-400 hover:text-blue-600 bg-slate-50 rounded-xl transition-all"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button>
+                  )}
+                  {canEditProject(project) && (
+                    <button onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }} className="p-2 text-slate-400 hover:text-rose-600 bg-slate-50 rounded-xl transition-all"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                  )}
+                </div>
               </div>
-              <h3 className="text-xl font-black text-slate-900 mb-2 leading-tight">{project.name}</h3><p className="text-sm font-bold text-slate-400 mb-4">{project.type}</p>
+              <h3 className="text-xl font-black mb-2 leading-tight" style={{ color: project.color || '#0f172a' }}>{project.name}</h3><p className="text-sm font-bold text-slate-400 mb-4">{project.type}</p>
               <div className="space-y-1 mb-6 border-t pt-4"><p className="text-[10px] font-black text-slate-400 uppercase">מנהל העמותה</p><p className="text-xs font-bold text-slate-800">{project.orgManagerName || 'לא הוזן'}</p><p className="text-[10px] text-slate-500">{project.orgManagerPhone} | {project.orgManagerEmail}</p></div>
               <div className="grid grid-cols-2 gap-4 bg-blue-50 p-4 rounded-2xl"><div><p className="text-[9px] font-black text-slate-400 uppercase mb-1">יעד גיוס</p><p className="text-sm font-black text-slate-900">₪{project.financialGoal?.toLocaleString() || 0}</p></div>
                 <div><p className="text-[9px] font-black text-slate-400 uppercase mb-1">סה״כ עלות</p><p className="text-sm font-black text-blue-600">₪{project.projectTotalCost?.toLocaleString() || 0}</p></div></div>
             </div>
-            <div className="px-8 py-4 bg-slate-50 border-t flex justify-between items-center text-[10px] font-bold text-slate-400"><span>מנהל פנימי: {users.find(u => u.id === project.managerId)?.name}</span><span>{project.plannedEndDate}</span></div>
+            <div className="px-8 py-4 bg-slate-50 border-t flex justify-between items-center text-[10px] font-bold text-slate-400">
+              <span>מנהל פנימי: {users.find(u => u.id === project.managerId)?.name}</span>
+              <div className="flex items-center gap-3">
+                <button onClick={(e) => { e.stopPropagation(); setSelectedProjectDetail(project); setDetailModalOpen(true); }} className="text-[10px] font-black text-slate-600 hover:text-slate-800">פרטים</button>
+                <span className="text-slate-300">•</span>
+                <button onClick={(e) => { e.stopPropagation(); navigate(`/project?id=${project.id}`); }} className="text-[10px] font-black text-blue-600 hover:text-blue-700">פתח פרויקט</button>
+              </div>
+            </div>
           </div>
         ))}
       </div>
@@ -144,9 +265,52 @@ const ProjectsPage: React.FC = () => {
             <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase">מנהל פרויקט פנימי *</label><select name="managerId" required defaultValue={editingProject?.managerId} className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none">{users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
             <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase">סוג פרויקט *</label><select name="type" required defaultValue={editingProject?.type} className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none">{Object.values(ProjectType).map(v => <option key={v} value={v}>{v}</option>)}</select></div></div>
           <h3 className="text-sm font-black text-blue-600 border-b pb-2 mb-4 mt-8">פרטי מנהל העמותה</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5"><div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase">שם מנהל העמותה</label><input name="orgManagerName" defaultValue={editingProject?.orgManagerName} className="w-full border-slate-200 bg-slate-50 rounded-xl px-4 py-2" /></div>
-            <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase">טלפון</label><input name="orgManagerPhone" defaultValue={editingProject?.orgManagerPhone} className="w-full border-slate-200 bg-slate-50 rounded-xl px-4 py-2" /></div>
-            <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase">אימייל</label><input name="orgManagerEmail" defaultValue={editingProject?.orgManagerEmail} className="w-full border-slate-200 bg-slate-50 rounded-xl px-4 py-2" /></div></div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="space-y-1 relative">
+              <label className="text-xs font-black text-slate-400 uppercase">שם מנהל העמותה</label>
+              <input
+                name="orgManagerName"
+                value={orgManagerName}
+                onChange={(e) => {
+                  setOrgManagerName(e.target.value);
+                  if (orgManagerContactId) setOrgManagerContactId('');
+                }}
+                className="w-full border-slate-200 bg-slate-50 rounded-xl px-4 py-2"
+                placeholder="התחל להקליד כדי לבחור איש קשר"
+              />
+              {orgManagerName.trim() && contacts.filter(c =>
+                c.name.toLowerCase().includes(orgManagerName.toLowerCase()) ||
+                c.email.toLowerCase().includes(orgManagerName.toLowerCase()) ||
+                c.phone.toLowerCase().includes(orgManagerName.toLowerCase())
+              ).slice(0, 6).length > 0 && (
+                <div className="absolute z-20 mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+                  {contacts.filter(c =>
+                    c.name.toLowerCase().includes(orgManagerName.toLowerCase()) ||
+                    c.email.toLowerCase().includes(orgManagerName.toLowerCase()) ||
+                    c.phone.toLowerCase().includes(orgManagerName.toLowerCase())
+                  ).slice(0, 6).map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setOrgManagerContactId(c.id);
+                        setOrgManagerName(c.name || '');
+                        setOrgManagerPhone(c.phone || '');
+                        setOrgManagerEmail(c.email || '');
+                      }}
+                      className="w-full text-right px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center justify-between"
+                    >
+                      <span className="font-bold text-slate-800">{c.name}</span>
+                      <span className="text-[10px] text-slate-500">{c.email || c.phone}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="text-[10px] text-slate-500">אפשר לבחור איש קשר קיים או להקליד חדש.</p>
+            </div>
+            <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase">טלפון</label><input name="orgManagerPhone" value={orgManagerPhone} onChange={(e) => setOrgManagerPhone(e.target.value)} className="w-full border-slate-200 bg-slate-50 rounded-xl px-4 py-2" /></div>
+            <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase">אימייל</label><input name="orgManagerEmail" value={orgManagerEmail} onChange={(e) => setOrgManagerEmail(e.target.value)} className="w-full border-slate-200 bg-slate-50 rounded-xl px-4 py-2" /></div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-8"><div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase">תאריך התחלה</label><input name="plannedStartDate" type="date" defaultValue={editingProject?.plannedStartDate} className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3" /></div>
             <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase">תאריך יעד</label><input name="plannedEndDate" type="date" defaultValue={editingProject?.plannedEndDate} className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3" /></div>
             <div className="md:col-span-2 space-y-1"><label className="text-xs font-black text-slate-400 uppercase">סטטוס פרויקט</label><select name="status" defaultValue={editingProject?.status} className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none">{Object.values(ProjectStatus).map(s => <option key={s} value={s}>{s}</option>)}</select></div></div></form>
@@ -181,7 +345,7 @@ const ProjectsPage: React.FC = () => {
             <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase">תפקיד</label><input type="text" placeholder="הזן תפקיד" value={addContactFormData.title} onChange={(e) => setAddContactFormData({ ...addContactFormData, title: e.target.value })} className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500" /></div>
           </div>
           <div className="flex justify-start gap-4 pt-6 border-t">
-            <button onClick={() => { if (addContactFormData.name.trim()) { const projectId = editingProject?.id || tempProjectId || `tmp-${Date.now()}`; addContact({ id: `c-${Date.now()}`, projectId, organizationId: editingProject?.organizationId || 'org_client_1', name: addContactFormData.name, phone: addContactFormData.phone, email: addContactFormData.email, title: addContactFormData.title, }); setAddContactFormData({ name: '', phone: '', email: '', title: '' }); setAddContactModalOpen(false); } }} className="px-8 py-3.5 rounded-2xl font-black bg-blue-600 text-white hover:bg-blue-700 shadow-lg transition-all">הוסף איש קשר</button>
+            <button onClick={() => { if (addContactFormData.name.trim()) { const projectId = editingProject?.id || tempProjectId || `tmp-${Date.now()}`; addContact({ id: `c-${Date.now()}`, projectId, projectIds: [projectId], organizationId: editingProject?.organizationId || 'org_client_1', name: addContactFormData.name, phone: addContactFormData.phone, email: addContactFormData.email, title: addContactFormData.title, }); setAddContactFormData({ name: '', phone: '', email: '', title: '' }); setAddContactModalOpen(false); } }} className="px-8 py-3.5 rounded-2xl font-black bg-blue-600 text-white hover:bg-blue-700 shadow-lg transition-all">הוסף איש קשר</button>
             <button type="button" onClick={() => setAddContactModalOpen(false)} className="px-8 py-3.5 rounded-2xl font-bold bg-slate-100 text-slate-600 hover:bg-slate-200">ביטול</button>
           </div>
         </div>
@@ -238,7 +402,9 @@ const ProjectsPage: React.FC = () => {
             </div>
 
             <div className="flex justify-start gap-4 pt-4 border-t">
-              <button onClick={() => { setDetailModalOpen(false); setEditingProject(selectedProjectDetail); setModalOpen(true); }} className="px-8 py-3 rounded-2xl font-black bg-blue-600 text-white hover:bg-blue-700 transition-all">ערוך פרויקט</button>
+              {canEditProject(selectedProjectDetail) && (
+                <button onClick={() => { setDetailModalOpen(false); setEditingProject(selectedProjectDetail); setModalOpen(true); }} className="px-8 py-3 rounded-2xl font-black bg-blue-600 text-white hover:bg-blue-700 transition-all">ערוך פרויקט</button>
+              )}
               <button type="button" onClick={() => setDetailModalOpen(false)} className="px-8 py-3 rounded-2xl font-bold bg-slate-100 text-slate-600 hover:bg-slate-200">סגור</button>
             </div>
           </div>

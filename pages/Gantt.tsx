@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { TaskStatus, ProjectStatus } from '../types.ts';
+import { TaskStatus, ProjectStatus, TaskItemType } from '../types.ts';
 import { useData } from '../DataContext.tsx';
 
 const GanttPage: React.FC = () => {
@@ -19,6 +19,7 @@ const GanttPage: React.FC = () => {
     let filtered = tasks.filter(t => {
       const p = projects.find(proj => proj.id === t.projectId);
       if (!p || p.isDeleted) return false;
+      if (t.itemType === TaskItemType.SUB_TASK) return false;
       if (!showCompleted && p.status === ProjectStatus.COMPLETED) return false;
       if (selectedProjects.length > 0 && !selectedProjects.includes(t.projectId)) return false;
       return true;
@@ -229,6 +230,7 @@ const GanttPage: React.FC = () => {
                     const isOverdueTask = isOverdue(t);
                     const taskIsLateToStart = isLateToStart(t);
                     const taskIsLateToFinish = isLateToFinish(t);
+                    const projectColor = project?.color || '#3b82f6';
                     
                     return (
                       <div 
@@ -267,7 +269,8 @@ const GanttPage: React.FC = () => {
                               style={{ 
                                 left: Math.max(0, startDay * dayWidth), 
                                 width: Math.max(40, duration * dayWidth),
-                                opacity: hoveredTaskId && hoveredTaskId !== t.id ? 0.5 : 1
+                                opacity: hoveredTaskId && hoveredTaskId !== t.id ? 0.5 : 1,
+                                backgroundColor: projectColor
                               }}
                               title={`${t.name} (${t.plannedStartDate} עד ${t.plannedEndDate}) - ${t.progress}%`}
                             >

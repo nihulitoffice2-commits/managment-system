@@ -47,7 +47,8 @@ export enum ProjectStatus {
 
 export interface Contact {
   id: string;
-  projectId: string;
+  projectId?: string;
+  projectIds?: string[]; // Multiple project associations (or ['all'])
   organizationId: string;
   name: string;
   phone: string;

@@ -4,6 +4,8 @@ import { HashRouter, Routes, Route, Link, Navigate, useLocation } from 'react-ro
 import { UserRole, User } from './types.ts';
 import { DataProvider, useData } from './DataContext.tsx';
 import { ICONS } from './constants.tsx';
+import logoUrl from './static/logo.jpg';
+import stampUrl from './static/stampt.jpg';
 
 // Pages
 import DashboardPage from './pages/Dashboard.tsx';
@@ -52,7 +54,7 @@ const App: React.FC = () => {
   if (loading) return (
     <div className="h-screen flex flex-col items-center justify-center bg-slate-50 gap-4" dir="rtl">
       <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-      <p className="font-bold text-slate-500 animate-pulse">טוען מערכת ניהולית...</p>
+      <p className="font-bold text-slate-500 animate-pulse">טוען מערכת שמעון ראב...</p>
     </div>
   );
 
@@ -83,8 +85,13 @@ const AppContent: React.FC<{ user: User; onLogout: () => void }> = ({ user, onLo
       {/* Sidebar */}
       <aside className="w-64 bg-slate-900 text-white flex flex-col border-l border-slate-800 shrink-0">
         <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-black text-xl shadow-lg shadow-blue-900/50">N</div>
-          <span className="text-xl font-black tracking-tight">ניהולית</span>
+          <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center shadow-lg overflow-hidden">
+            <img src={logoUrl} alt="שמעון ראב" className="w-full h-full object-contain" />
+          </div>
+          <div className="leading-tight">
+            <span className="text-base font-black tracking-tight block">שמעון ראב</span>
+            <span className="text-[10px] text-slate-400 block">ייעוץ וליווי תהליכי התרמה</span>
+          </div>
         </div>
         
         <nav className="flex-1 overflow-y-auto p-4 space-y-1 custom-scrollbar">
@@ -199,51 +206,56 @@ const LoginModal: React.FC<{ onLogin: (user: User) => void }> = ({ onLogin }) =>
   };
 
   return (
-    <div className="w-full max-w-2xl">
+    <div className="w-full max-w-3xl">
       {/* Header Section */}
-      <div className="text-center mb-12">
-        <div className="inline-flex items-center justify-center w-20 h-20 bg-blue-600 rounded-3xl shadow-lg mb-6 transform transition-transform hover:scale-110">
-          <span className="text-4xl font-black text-white">N</span>
+      <div className="text-center mb-10">
+        <div className="inline-flex items-center justify-center w-20 h-20 bg-white rounded-2xl shadow-sm mb-5 ring-1 ring-slate-200/70">
+          <img src={logoUrl} alt="שמעון ראב" className="w-14 h-14 object-contain" />
         </div>
-        <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight mb-3">ניהולית</h1>
-        <p className="text-lg text-slate-500 font-medium">מערכת ניהול קמפיינים וקשרים</p>
+        <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight mb-2">שמעון ראב | ייעוץ וליווי תהליכי התרמה</h1>
+        <p className="text-sm md:text-base text-slate-500 font-medium">מערכת לניהול תהליכים, קמפיינים וקשרים</p>
       </div>
 
       {/* Form Card */}
-      <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm p-8 md:p-12 space-y-8">
+      <div className="relative bg-white rounded-[2rem] border border-slate-200/70 shadow-[0_10px_40px_-30px_rgba(15,23,42,0.5)] p-7 md:p-10 space-y-7 overflow-hidden">
+        <img
+          src={stampUrl}
+          alt="חותמת שמעון ראב"
+          className="pointer-events-none absolute bottom-6 left-1/2 w-44 h-44 -translate-x-1/2 opacity-90 rotate-0 object-contain"
+        />
         
         {/* Welcome Message */}
-        <div className="text-center mb-8">
-          <h2 className="text-2xl font-black text-slate-900 mb-2">ברוכים הבאים בחזרה</h2>
-          <p className="text-slate-500">היכנס לחשבונך כדי להנהל פרויקטים וקשרים</p>
+        <div className="text-center mb-6">
+          <h2 className="text-xl md:text-2xl font-black text-slate-900 mb-2">ברוכים הבאים בחזרה</h2>
+          <p className="text-slate-500 text-sm md:text-base">היכנס לחשבונך כדי לנהל תהליכי התרמה, פרויקטים וקשרים</p>
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-6 text-right">
+        <form onSubmit={handleSubmit} className="space-y-5 text-right">
           
           {/* Email Field */}
           <div className="space-y-2">
-            <label className="text-xs font-black text-slate-400 uppercase tracking-widest block">📧 אימייל</label>
+            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">אימייל</label>
             <input
               type="email"
               required
               value={emailInput}
               onChange={(e) => setEmailInput(e.target.value)}
               placeholder="your@email.com"
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5 outline-none transition-all duration-200 hover:border-slate-300 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 text-slate-900 placeholder-slate-400"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none transition-all duration-200 hover:border-slate-300 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 text-slate-900 placeholder-slate-400"
             />
           </div>
 
           {/* Password Field */}
           <div className="space-y-2">
-            <label className="text-xs font-black text-slate-400 uppercase tracking-widest block">🔐 סיסמה</label>
+            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">סיסמה</label>
             <input
               type="password"
               required
               value={passwordInput}
               onChange={(e) => setPasswordInput(e.target.value)}
               placeholder="••••••••"
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5 outline-none transition-all duration-200 hover:border-slate-300 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 text-slate-900 placeholder-slate-400"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none transition-all duration-200 hover:border-slate-300 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 text-slate-900 placeholder-slate-400"
             />
           </div>
 
@@ -261,7 +273,7 @@ const LoginModal: React.FC<{ onLogin: (user: User) => void }> = ({ onLogin }) =>
           <button
             type="submit"
             disabled={loadingState}
-            className="w-full bg-blue-600 text-white px-8 py-3.5 rounded-2xl font-black shadow-lg hover:bg-blue-700 disabled:bg-blue-400 transition-all transform hover:scale-105 disabled:scale-100 flex items-center justify-center gap-2 mt-8"
+            className="w-full bg-blue-600 text-white px-8 py-3 rounded-xl font-black shadow-sm hover:bg-blue-700 disabled:bg-blue-400 transition-all flex items-center justify-center gap-2 mt-6"
           >
             {loadingState ? (
               <>
@@ -278,10 +290,10 @@ const LoginModal: React.FC<{ onLogin: (user: User) => void }> = ({ onLogin }) =>
         </form>
 
         {/* Info Section */}
-        <div className="pt-8 border-t border-slate-100 space-y-4">
+        <div className="pt-6 border-t border-slate-100 space-y-4">
           <div className="space-y-3">
-            <p className="text-xs font-black text-slate-600 uppercase tracking-widest">ℹ️ מידע חשוב</p>
-            <div className="space-y-2 text-sm text-slate-600 leading-relaxed">
+            <p className="text-[11px] font-black text-slate-600 uppercase tracking-widest">מידע חשוב</p>
+            <div className="space-y-2 text-[13px] text-slate-600 leading-relaxed">
               <p>✓ רק משתמשים מורשים יכולים להתחבר למערכת</p>
               <p>✓ ההתחברות תהיה בתוקף <span className="font-black text-blue-600">30 יום</span> עד להתנתקות</p>
               <p>✓ לשאלות ועזרה, צור קשר עם מנהל המערכת</p>
@@ -293,7 +305,7 @@ const LoginModal: React.FC<{ onLogin: (user: User) => void }> = ({ onLogin }) =>
       {/* Footer */}
       <div className="text-center mt-8">
         <p className="text-sm text-slate-500 font-medium">
-          כל הזכויות שמורות © 2026 ניהולית
+          כל הזכויות שמורות © 2026 שמעון ראב
         </p>
       </div>
     </div>

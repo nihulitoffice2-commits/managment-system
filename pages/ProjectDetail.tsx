@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Project, Task, TaskStatus } from '../types.ts';
+import { Project, Task, TaskStatus, TaskItemType, TaskCategory, TaskPriority, SchedulingMode, UserRole } from '../types.ts';
 import { useData } from '../DataContext.tsx';
+import Modal from '../components/Modal.tsx';
 
 type TaskFilter = 'all' | TaskStatus | 'late' | 'lateToStart' | 'lateToFinish';
 type SortField = 'startDate' | 'endDate' | 'progress' | 'name';
@@ -10,13 +11,25 @@ const ProjectDetailPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const projectId = searchParams.get('id');
-  const { projects, tasks, users, contacts, updateTask: originalUpdateTask } = useData();
+  const { projects, tasks, users, contacts, addTask, updateTask: originalUpdateTask, currentUser } = useData();
   const [filter, setFilter] = useState<TaskFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortField>('startDate');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingStatus, setEditingStatus] = useState<TaskStatus | null>(null);
   const [editingProgress, setEditingProgress] = useState<number>(0);
+  const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
+  const [newTaskData, setNewTaskData] = useState<Partial<Task>>({});
+  const [templateTaskId, setTemplateTaskId] = useState('');
+  const [draftSubtasks, setDraftSubtasks] = useState<Array<{ id: string; name: string; plannedStartDate: string; plannedEndDate: string; status: TaskStatus; performerContactId?: string }>>([]);
+  const [subtaskDraft, setSubtaskDraft] = useState<{ name: string; plannedStartDate: string; plannedEndDate: string; status: TaskStatus; performerContactId?: string }>({
+    name: '',
+    plannedStartDate: '',
+    plannedEndDate: '',
+    status: TaskStatus.NOT_STARTED,
+    performerContactId: undefined
+  });
+  const [editingDraftSubtaskId, setEditingDraftSubtaskId] = useState<string | null>(null);
 
   // Wrapper function to handle automatic date updates
   const updateTask = (taskId: string, updates: Partial<Task>) => {
@@ -39,10 +52,141 @@ const ProjectDetailPage: React.FC = () => {
   };
 
   const project = useMemo(() => projects.find(p => p.id === projectId), [projectId, projects]);
+
+  const isSysAdmin = currentUser?.role === UserRole.SYS_ADMIN;
+  const isPmAdmin = currentUser?.role === UserRole.PM_ADMIN;
+  const isWorker = currentUser?.role === UserRole.WORKER;
+  const canCreateTask = isSysAdmin || isPmAdmin || isWorker;
+
+  const isTaskRelatedToUser = (task: Task) => {
+    if (!currentUser) return false;
+    if (task.assignees?.includes(currentUser.id)) return true;
+    if (task.performerContactId) {
+      const contact = contacts.find(c => c.id === task.performerContactId);
+      if (contact?.email && contact.email === currentUser.email) return true;
+    }
+    return false;
+  };
+
+  const canEditTask = (task: Task) => {
+    if (isSysAdmin || isPmAdmin) return true;
+    if (isWorker) return isTaskRelatedToUser(task);
+    return false;
+  };
+
+  const contactMatchesProject = (contact: any, pid?: string) => {
+    const ids = contact.projectIds?.length ? contact.projectIds : (contact.projectId ? [contact.projectId] : []);
+    if (ids.includes('all')) return true;
+    if (!pid) return false;
+    return ids.includes(pid);
+  };
+
+  useEffect(() => {
+    if (!project) return;
+    setNewTaskData({
+      projectId: project.id,
+      organizationId: project.organizationId,
+      itemType: TaskItemType.TASK,
+      name: '',
+      description: '',
+      category: TaskCategory.OPERATIONS,
+      assignees: [],
+      priority: TaskPriority.MEDIUM,
+      status: TaskStatus.NOT_STARTED,
+      progress: 0,
+      dependencies: [],
+      schedulingMode: SchedulingMode.FIXED,
+      workDays: 1,
+      plannedStartDate: project.plannedStartDate,
+      plannedEndDate: project.plannedEndDate,
+      hasIssue: false
+    });
+    setTemplateTaskId('');
+    setDraftSubtasks([]);
+    setEditingDraftSubtaskId(null);
+    setSubtaskDraft({
+      name: '',
+      plannedStartDate: project.plannedStartDate,
+      plannedEndDate: project.plannedEndDate,
+      status: TaskStatus.NOT_STARTED,
+      performerContactId: undefined
+    });
+  }, [project, isNewTaskOpen]);
+
+  const applyTemplateTask = (taskId: string) => {
+    const template = tasks.find(t => t.id === taskId);
+    if (!template) return;
+    setTemplateTaskId(taskId);
+    setNewTaskData({
+      projectId: project?.id,
+      organizationId: project?.organizationId,
+      itemType: TaskItemType.TASK,
+      name: template.name,
+      description: template.description,
+      role: template.role,
+      category: template.category,
+      assignees: [],
+      performerContactId: undefined,
+      priority: template.priority,
+      status: TaskStatus.NOT_STARTED,
+      progress: 0,
+      dependencies: [],
+      schedulingMode: template.schedulingMode,
+      workDays: template.workDays,
+      plannedStartDate: template.plannedStartDate,
+      plannedEndDate: template.plannedEndDate,
+      hasIssue: false,
+      issueDetail: undefined
+    });
+
+    const templateSubtasks = tasks
+      .filter(t => t.parentTaskId === template.id && t.itemType === TaskItemType.SUB_TASK)
+      .map(t => ({
+        id: `draft-${t.id}`,
+        name: t.name,
+        plannedStartDate: t.plannedStartDate,
+        plannedEndDate: t.plannedEndDate,
+        status: t.status,
+        performerContactId: t.performerContactId
+      }));
+    setDraftSubtasks(templateSubtasks);
+  };
+
+  const handleAddSubtaskDraft = () => {
+    if (!subtaskDraft.name.trim()) return;
+    setDraftSubtasks(prev => [
+      ...prev,
+      {
+        id: `draft-${Date.now()}`,
+        name: subtaskDraft.name.trim(),
+        plannedStartDate: subtaskDraft.plannedStartDate,
+        plannedEndDate: subtaskDraft.plannedEndDate,
+        status: subtaskDraft.status,
+        performerContactId: subtaskDraft.performerContactId
+      }
+    ]);
+    setSubtaskDraft({
+      name: '',
+      plannedStartDate: (newTaskData.plannedStartDate as string) || '',
+      plannedEndDate: (newTaskData.plannedEndDate as string) || '',
+      status: TaskStatus.NOT_STARTED,
+      performerContactId: undefined
+    });
+  };
+
+  const templateSuggestions = useMemo(() => {
+    if (!isNewTaskOpen) return [];
+    const q = (newTaskData.name || '').toString().trim();
+    if (!q) return [];
+    return tasks
+      .filter(t => t.itemType !== TaskItemType.SUB_TASK)
+      .filter(t => t.name.toLowerCase().includes(q.toLowerCase()))
+      .slice(0, 6);
+  }, [tasks, newTaskData.name, isNewTaskOpen]);
   
   const projectTasks = useMemo(() => {
     if (!project) return [];
-    let filtered = tasks.filter(t => t.projectId === project.id);
+    let filtered = tasks.filter(t => t.projectId === project.id && t.itemType !== TaskItemType.SUB_TASK);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -107,7 +251,7 @@ const ProjectDetailPage: React.FC = () => {
   }, [project, tasks, filter, searchQuery, sortBy]);
 
   const taskStats = useMemo(() => {
-    const allTasks = tasks.filter(t => t.projectId === project?.id);
+    const allTasks = tasks.filter(t => t.projectId === project?.id && t.itemType !== TaskItemType.SUB_TASK);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -143,7 +287,7 @@ const ProjectDetailPage: React.FC = () => {
   const overallProgress = useMemo(() => {
     if (taskStats.total === 0) return 0;
     const totalProgress = tasks
-      .filter(t => t.projectId === project?.id)
+      .filter(t => t.projectId === project?.id && t.itemType !== TaskItemType.SUB_TASK)
       .reduce((sum, task) => sum + task.progress, 0);
     return Math.round(totalProgress / taskStats.total);
   }, [project, tasks, taskStats.total]);
@@ -154,15 +298,21 @@ const ProjectDetailPage: React.FC = () => {
   }, [taskStats]);
 
   const handleStatusUpdate = (taskId: string, newStatus: TaskStatus) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (task && !canEditTask(task)) return;
     updateTask(taskId, { status: newStatus });
     setEditingTaskId(null);
   };
 
   const handleProgressUpdate = (taskId: string, newProgress: number) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (task && !canEditTask(task)) return;
     updateTask(taskId, { progress: newProgress });
   };
 
   const startEditing = (taskId: string, status: TaskStatus, progress: number) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (task && !canEditTask(task)) return;
     setEditingTaskId(taskId);
     setEditingStatus(status);
     setEditingProgress(progress);
@@ -175,6 +325,8 @@ const ProjectDetailPage: React.FC = () => {
   };
 
   const saveEditing = (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (task && !canEditTask(task)) return;
     if (editingStatus) {
       updateTask(taskId, { status: editingStatus, progress: editingProgress });
       cancelEditing();
@@ -612,10 +764,12 @@ const ProjectDetailPage: React.FC = () => {
     );
   }
 
+  const projectColor = project.color || '#2563eb';
+
   return (
     <div className="space-y-8 text-right pb-12" dir="rtl">
       {/* Header - Solid color with progress */}
-      <div className="bg-blue-600 rounded-[2rem] p-8 text-white shadow-xl">
+      <div className="rounded-[2rem] p-8 text-white shadow-xl" style={{ background: projectColor }}>
         <button onClick={() => navigate('/projects')} className="mb-4 text-white/80 hover:text-white font-bold transition-colors flex items-center gap-2">
           <span>←</span> חזור לפרויקטים
         </button>
@@ -624,13 +778,7 @@ const ProjectDetailPage: React.FC = () => {
           <div className="flex-1">
             <h1 className="text-4xl font-black mb-3">{project.name}</h1>
             <div className="flex items-center gap-3 flex-wrap">
-              <span className="inline-block bg-white/90 text-blue-900 text-xs font-black px-4 py-2 rounded-xl shadow-sm">{project.type}</span>
-              {project.color && (
-                <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-xl shadow-sm">
-                  <div style={{backgroundColor: project.color}} className="w-5 h-5 rounded-full border-2 border-white shadow-sm"></div>
-                  <span className="text-sm font-bold text-white">{project.color}</span>
-                </div>
-              )}
+              <span className="inline-block bg-white/90 text-slate-900 text-xs font-black px-4 py-2 rounded-xl shadow-sm">{project.type}</span>
               <span className="inline-block bg-white/20 backdrop-blur-sm text-white text-xs font-bold px-4 py-2 rounded-xl">
                 📊 {taskStats.total} משימות
               </span>
@@ -651,8 +799,8 @@ const ProjectDetailPage: React.FC = () => {
           </div>
           <div className="relative w-full h-6 bg-white/20 rounded-full overflow-hidden backdrop-blur-sm">
             <div 
-              className="h-full bg-green-400 rounded-full transition-all duration-500 flex items-center justify-end px-3"
-              style={{width: `${overallProgress}%`}}
+              className="h-full rounded-full transition-all duration-500 flex items-center justify-end px-3"
+              style={{width: `${overallProgress}%`, backgroundColor: projectColor}}
             >
               {overallProgress > 15 && <span className="text-xs font-black text-white drop-shadow">{overallProgress}%</span>}
             </div>
@@ -879,6 +1027,14 @@ const ProjectDetailPage: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-2xl font-black text-slate-900">רשימת משימות</h3>
             <div className="flex items-center gap-3">
+              {canCreateTask && (
+                <button
+                  onClick={() => setIsNewTaskOpen(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors"
+                >
+                  + משימה חדשה
+                </button>
+              )}
               {/* Export to Excel Button */}
               <button
                 onClick={() => {
@@ -961,7 +1117,7 @@ const ProjectDetailPage: React.FC = () => {
                   const isLate = isLateToStart || isLateToFinish;
                   
                   return (
-                    <tr key={task.id} className={`transition-colors ${
+                    <tr key={task.id} style={{ borderRight: `4px solid ${projectColor}` }} className={`transition-colors ${
                       isEditing ? 'bg-blue-50' : 
                       isLate ? 'bg-orange-50/50 hover:bg-orange-100/50' : 
                       'hover:bg-slate-50/50'
@@ -1029,7 +1185,7 @@ const ProjectDetailPage: React.FC = () => {
                         ) : (
                           <div className="flex items-center justify-center gap-2">
                             <div className="w-20 h-2 bg-slate-200 rounded-full overflow-hidden">
-                              <div className="h-full bg-blue-600 rounded-full transition-all" style={{width: `${task.progress}%`}}></div>
+                              <div className="h-full rounded-full transition-all" style={{width: `${task.progress}%`, backgroundColor: projectColor}}></div>
                             </div>
                             <span className="text-xs font-bold text-slate-600 w-8">{task.progress}%</span>
                           </div>
@@ -1053,13 +1209,15 @@ const ProjectDetailPage: React.FC = () => {
                           </div>
                         ) : (
                           <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={() => startEditing(task.id, task.status, task.progress)}
-                              className="px-4 py-2 bg-blue-600 text-white text-xs font-black rounded-lg hover:bg-blue-700 transition-colors"
-                            >
-                              ✎ ערוך
-                            </button>
-                            {task.status !== TaskStatus.DONE && (
+                            {canEditTask(task) && (
+                              <button
+                                onClick={() => startEditing(task.id, task.status, task.progress)}
+                                className="px-4 py-2 bg-blue-600 text-white text-xs font-black rounded-lg hover:bg-blue-700 transition-colors"
+                              >
+                                ✎ ערוך
+                              </button>
+                            )}
+                            {canEditTask(task) && task.status !== TaskStatus.DONE && (
                               <button
                                 onClick={() => updateTask(task.id, { status: TaskStatus.DONE, progress: 100 })}
                                 className="px-3 py-2 bg-green-600 text-white text-xs font-black rounded-lg hover:bg-green-700 transition-colors"
@@ -1086,12 +1244,343 @@ const ProjectDetailPage: React.FC = () => {
         )}
       </div>
 
+      <Modal isOpen={isNewTaskOpen} onClose={() => setIsNewTaskOpen(false)} title="משימה חדשה לפרויקט">
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!project) return;
+            if (!newTaskData.name) return;
+            if (!canCreateTask) return;
+            const assignees = isWorker && currentUser ? [currentUser.id] : (newTaskData.assignees || []);
+            const createdId = await addTask({
+              id: '',
+              organizationId: project.organizationId,
+              projectId: project.id,
+              itemType: TaskItemType.TASK,
+              name: newTaskData.name as string,
+              description: newTaskData.description || '',
+              role: newTaskData.role,
+              category: (newTaskData.category as TaskCategory) || TaskCategory.OPERATIONS,
+              assignees,
+              performerContactId: newTaskData.performerContactId,
+              priority: (newTaskData.priority as TaskPriority) || TaskPriority.MEDIUM,
+              status: (newTaskData.status as TaskStatus) || TaskStatus.NOT_STARTED,
+              progress: 0,
+              dependencies: [],
+              schedulingMode: SchedulingMode.FIXED,
+              workDays: newTaskData.workDays || 1,
+              plannedStartDate: newTaskData.plannedStartDate as string,
+              plannedEndDate: newTaskData.plannedEndDate as string,
+              hasIssue: false
+            } as Task);
+
+            if (createdId) {
+              for (const sub of draftSubtasks) {
+                const subAssignees = isWorker && currentUser ? [currentUser.id] : [];
+                await addTask({
+                  id: '',
+                  organizationId: project.organizationId,
+                  projectId: project.id,
+                  itemType: TaskItemType.SUB_TASK,
+                  parentTaskId: createdId,
+                  parentId: createdId,
+                  name: sub.name,
+                  description: '',
+                  category: (newTaskData.category as TaskCategory) || TaskCategory.OPERATIONS,
+                  assignees: subAssignees,
+                  performerContactId: sub.performerContactId,
+                  priority: (newTaskData.priority as TaskPriority) || TaskPriority.MEDIUM,
+                  status: sub.status,
+                  progress: sub.status === TaskStatus.DONE ? 100 : 0,
+                  dependencies: [],
+                  schedulingMode: SchedulingMode.FIXED,
+                  workDays: 1,
+                  plannedStartDate: sub.plannedStartDate,
+                  plannedEndDate: sub.plannedEndDate,
+                  hasIssue: false
+                } as Task);
+              }
+            }
+            setIsNewTaskOpen(false);
+          }}
+          className="space-y-6 text-right" dir="rtl"
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="md:col-span-2 space-y-1">
+              <label className="text-xs font-black text-slate-400 uppercase">שם המשימה *</label>
+              <div className="relative">
+                <input
+                  required
+                  value={newTaskData.name || ''}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    setNewTaskData({ ...newTaskData, name: nextValue });
+                    if (templateTaskId) {
+                      const template = tasks.find(t => t.id === templateTaskId);
+                      if (template && nextValue !== template.name) {
+                        setTemplateTaskId('');
+                      }
+                    }
+                  }}
+                  className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500"
+                  placeholder="התחל להקליד... אפשר לשכפל ממשימה קיימת"
+                />
+                {templateSuggestions.length > 0 && (
+                  <div className="absolute z-20 mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+                    {templateSuggestions.map(t => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => applyTemplateTask(t.id)}
+                        className="w-full text-right px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center justify-between"
+                      >
+                        <span className="font-bold text-slate-800">{t.name}</span>
+                        <span className="text-[10px] text-slate-500">{projects.find(p => p.id === t.projectId)?.name || 'ללא פרויקט'}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-400">אפשר להקליד שם חדש או לבחור הצעה לשכפול פרטי המשימה.</p>
+            </div>
+            <div className="md:col-span-2 space-y-1">
+              <label className="text-xs font-black text-slate-400 uppercase">תיאור</label>
+              <textarea
+                value={newTaskData.description || ''}
+                onChange={(e) => setNewTaskData({ ...newTaskData, description: e.target.value })}
+                rows={3}
+                className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 resize-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-black text-slate-400 uppercase">קטגוריה</label>
+              <select
+                value={newTaskData.category || TaskCategory.OPERATIONS}
+                onChange={(e) => setNewTaskData({ ...newTaskData, category: e.target.value as TaskCategory })}
+                className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none"
+              >
+                {Object.values(TaskCategory).map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-black text-slate-400 uppercase">עדיפות</label>
+              <select
+                value={newTaskData.priority || TaskPriority.MEDIUM}
+                onChange={(e) => setNewTaskData({ ...newTaskData, priority: e.target.value as TaskPriority })}
+                className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none"
+              >
+                {Object.values(TaskPriority).map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-black text-slate-400 uppercase">שיבוץ</label>
+              <select
+                value={newTaskData.performerContactId || ''}
+                onChange={(e) => setNewTaskData({ ...newTaskData, performerContactId: e.target.value || undefined })}
+                className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none"
+              >
+                <option value="">--- לא שובץ ---</option>
+                {contacts.filter(c => contactMatchesProject(c, project?.id)).map(c => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.title})</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-black text-slate-400 uppercase">תאריך התחלה</label>
+              <input
+                type="date"
+                value={newTaskData.plannedStartDate || ''}
+                onChange={(e) => setNewTaskData({ ...newTaskData, plannedStartDate: e.target.value })}
+                className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-black text-slate-400 uppercase">תאריך סיום</label>
+              <input
+                type="date"
+                value={newTaskData.plannedEndDate || ''}
+                onChange={(e) => setNewTaskData({ ...newTaskData, plannedEndDate: e.target.value })}
+                className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-black text-slate-400 uppercase">סטטוס</label>
+              <select
+                value={newTaskData.status || TaskStatus.NOT_STARTED}
+                onChange={(e) => setNewTaskData({ ...newTaskData, status: e.target.value as TaskStatus })}
+                className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none"
+              >
+                {Object.values(TaskStatus).map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-4 pt-6 border-t">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-black text-slate-900">תתי משימות</p>
+                <p className="text-xs text-slate-500">אפשר להוסיף תתי משימות כחלק מהמשימה</p>
+              </div>
+              <span className="text-[10px] text-slate-400 font-bold">{draftSubtasks.length} פריטים</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+              <div className="md:col-span-2 space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">שם תת-משימה</label>
+                <input
+                  value={subtaskDraft.name}
+                  onChange={(e) => setSubtaskDraft({ ...subtaskDraft, name: e.target.value })}
+                  className="w-full border-slate-200 bg-slate-50 rounded-xl px-4 py-2.5 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-blue-500"
+                  placeholder="הזן שם"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">תחילה</label>
+                <input
+                  type="date"
+                  value={subtaskDraft.plannedStartDate}
+                  onChange={(e) => setSubtaskDraft({ ...subtaskDraft, plannedStartDate: e.target.value })}
+                  className="w-full border-slate-200 bg-slate-50 rounded-xl px-3 py-2.5 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">סיום</label>
+                <input
+                  type="date"
+                  value={subtaskDraft.plannedEndDate}
+                  onChange={(e) => setSubtaskDraft({ ...subtaskDraft, plannedEndDate: e.target.value })}
+                  className="w-full border-slate-200 bg-slate-50 rounded-xl px-3 py-2.5 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">סטטוס</label>
+                <select
+                  value={subtaskDraft.status}
+                  onChange={(e) => setSubtaskDraft({ ...subtaskDraft, status: e.target.value as TaskStatus })}
+                  className="w-full border-slate-200 bg-slate-50 rounded-xl px-3 py-2.5 text-sm"
+                >
+                  {Object.values(TaskStatus).map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase">שיבוץ</label>
+                <select
+                  value={subtaskDraft.performerContactId || ''}
+                  onChange={(e) => setSubtaskDraft({ ...subtaskDraft, performerContactId: e.target.value || undefined })}
+                  className="w-full border-slate-200 bg-slate-50 rounded-xl px-3 py-2.5 text-sm"
+                >
+                  <option value="">--- לא שובץ ---</option>
+                  {contacts.filter(c => contactMatchesProject(c, project?.id)).map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.title})</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddSubtaskDraft}
+                className="md:col-span-6 bg-slate-900 text-white px-4 py-2.5 rounded-xl font-black text-sm hover:bg-slate-800"
+              >
+                + הוסף תת-משימה
+              </button>
+            </div>
+
+            {draftSubtasks.length > 0 && (
+              <div className="space-y-2">
+                {draftSubtasks.map(st => (
+                  <div
+                    key={st.id}
+                    onDoubleClick={() => setEditingDraftSubtaskId(st.id)}
+                    className="grid grid-cols-1 md:grid-cols-7 gap-3 items-center bg-slate-50 rounded-xl p-3 border border-slate-100"
+                  >
+                    {editingDraftSubtaskId === st.id ? (
+                      <>
+                        <input
+                          value={st.name}
+                          onChange={(e) => setDraftSubtasks(prev => prev.map(d => d.id === st.id ? { ...d, name: e.target.value } : d))}
+                          onBlur={() => setEditingDraftSubtaskId(null)}
+                          className="md:col-span-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                        />
+                        <input
+                          type="date"
+                          value={st.plannedStartDate}
+                          onChange={(e) => setDraftSubtasks(prev => prev.map(d => d.id === st.id ? { ...d, plannedStartDate: e.target.value } : d))}
+                          className="bg-white border border-slate-200 rounded-lg px-2 py-2 text-sm"
+                        />
+                        <input
+                          type="date"
+                          value={st.plannedEndDate}
+                          onChange={(e) => setDraftSubtasks(prev => prev.map(d => d.id === st.id ? { ...d, plannedEndDate: e.target.value } : d))}
+                          className="bg-white border border-slate-200 rounded-lg px-2 py-2 text-sm"
+                        />
+                        <select
+                          value={st.status}
+                          onChange={(e) => setDraftSubtasks(prev => prev.map(d => d.id === st.id ? { ...d, status: e.target.value as TaskStatus } : d))}
+                          className="bg-white border border-slate-200 rounded-lg px-2 py-2 text-sm"
+                        >
+                          {Object.values(TaskStatus).map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                        <select
+                          value={st.performerContactId || ''}
+                          onChange={(e) => setDraftSubtasks(prev => prev.map(d => d.id === st.id ? { ...d, performerContactId: e.target.value || undefined } : d))}
+                          className="bg-white border border-slate-200 rounded-lg px-2 py-2 text-sm"
+                        >
+                          <option value="">--- לא שובץ ---</option>
+                          {contacts.filter(c => contactMatchesProject(c, project?.id)).map(c => (
+                            <option key={c.id} value={c.id}>{c.name} ({c.title})</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setDraftSubtasks(prev => prev.filter(d => d.id !== st.id))}
+                          className="text-rose-600 text-xs font-black hover:text-rose-700"
+                        >
+                          הסר
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="md:col-span-2 text-sm font-bold text-slate-800">{st.name}</div>
+                        <div className="text-xs text-slate-500">{st.plannedStartDate}</div>
+                        <div className="text-xs text-slate-500">{st.plannedEndDate}</div>
+                        <div className="text-xs font-bold text-slate-600">{st.status}</div>
+                        <div className="text-xs text-slate-500">
+                          {contacts.find(c => c.id === st.performerContactId)?.name || 'לא שובץ'}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEditingDraftSubtaskId(st.id)}
+                          className="text-blue-600 text-xs font-black hover:text-blue-700"
+                        >
+                          עריכה
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDraftSubtasks(prev => prev.filter(d => d.id !== st.id))}
+                          className="text-rose-600 text-xs font-black hover:text-rose-700"
+                        >
+                          הסר
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-start gap-4 pt-6 border-t">
+            <button type="submit" className="bg-blue-600 text-white px-12 py-3.5 rounded-2xl font-black shadow-lg hover:bg-blue-700 transition-all">שמור משימה</button>
+            <button type="button" onClick={() => setIsNewTaskOpen(false)} className="bg-slate-100 text-slate-600 px-8 py-3.5 rounded-2xl font-bold hover:bg-slate-200">ביטול</button>
+          </div>
+        </form>
+      </Modal>
+
       {/* Contacts */}
       {tasks.filter(t => t.projectId === project.id).length > 0 && (
         <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm">
           <h3 className="text-2xl font-black text-slate-900 mb-4">אנשי קשר בפרויקט</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {contacts.filter(c => c.projectId === project.id).map(contact => (
+            {contacts.filter(c => contactMatchesProject(c, project.id)).map(contact => (
               <div key={contact.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                 <p className="font-bold text-slate-900">{contact.name}</p>
                 <p className="text-xs text-slate-600 mt-1">{contact.title}</p>

@@ -1,12 +1,15 @@
 
 import React, { useState, useMemo } from 'react';
-import { Task, TaskStatus, TaskPriority } from '../types.ts';
+import { Task, TaskStatus, TaskPriority, UserRole } from '../types.ts';
 import { useData } from '../DataContext.tsx';
 import Modal from '../components/Modal.tsx';
 import { ICONS } from '../constants.tsx';
 
 const CalendarPage: React.FC = () => {
-  const { tasks: globalTasks, projects: globalProjects, contacts: globalContacts, meetings, addMeeting, updateMeeting, deleteMeeting } = useData();
+  const { tasks: globalTasks, projects: globalProjects, contacts: globalContacts, meetings, addMeeting, updateMeeting, deleteMeeting, currentUser } = useData();
+  const isSysAdmin = currentUser?.role === UserRole.SYS_ADMIN;
+  const isPmAdmin = currentUser?.role === UserRole.PM_ADMIN;
+  const canManageMeetings = isSysAdmin || isPmAdmin;
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const today = new Date(todayStr);
@@ -121,12 +124,14 @@ const CalendarPage: React.FC = () => {
   const [meetingForm, setMeetingForm] = useState<{date:string; time?:string; projectId?:string; contactId?:string; title:string; notes?:string}>({date: todayStr, title: ''});
   
   const openCreateMeetingModal = (date: string = todayStr) => {
+    if (!canManageMeetings) return;
     setEditingMeetingId(null);
     setMeetingForm({date, title: ''});
     setMeetingModalOpen(true);
   };
   
   const openEditMeetingModal = (meeting: any) => {
+    if (!canManageMeetings) return;
     setEditingMeetingId(meeting.id);
     setMeetingForm({date: meeting.date, time: meeting.time, projectId: meeting.projectId, contactId: meeting.contactId, title: meeting.title, notes: meeting.notes});
     setMeetingModalOpen(true);
@@ -149,13 +154,15 @@ const CalendarPage: React.FC = () => {
             <h1 className="text-3xl font-black text-slate-900">📅 לוח שנה</h1>
             <p className="text-slate-500 font-medium">ניהול משימות ופגישות חכם ויעיל</p>
           </div>
-          <button 
-            onClick={() => openCreateMeetingModal()} 
-            className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all flex items-center gap-2 whitespace-nowrap"
-          >
-            <span className="text-xl">📆</span>
-            <span>קבע פגישה חדשה</span>
-          </button>
+          {canManageMeetings && (
+            <button 
+              onClick={() => openCreateMeetingModal()} 
+              className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all flex items-center gap-2 whitespace-nowrap"
+            >
+              <span className="text-xl">📆</span>
+              <span>קבע פגישה חדשה</span>
+            </button>
+          )}
         </div>
 
         {/* Quick Stats */}
@@ -412,7 +419,7 @@ const CalendarPage: React.FC = () => {
       </div>
 
       <Modal isOpen={meetingModalOpen} onClose={() => setMeetingModalOpen(false)} title={editingMeetingId ? "עדכן פגישה" : "פגישה חדשה"}>
-        <form onSubmit={(e) => { e.preventDefault(); const orgId = globalProjects[0]?.organizationId || 'org_client_1'; if (editingMeetingId) { updateMeeting(editingMeetingId, meetingForm); } else { addMeeting({ id: '', organizationId: orgId, ...meetingForm } as any); } setMeetingModalOpen(false); }} className="space-y-4">
+        <form onSubmit={(e) => { e.preventDefault(); if (!canManageMeetings) return; const orgId = globalProjects[0]?.organizationId || 'org_client_1'; if (editingMeetingId) { updateMeeting(editingMeetingId, meetingForm); } else { addMeeting({ id: '', organizationId: orgId, ...meetingForm } as any); } setMeetingModalOpen(false); }} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-black text-slate-400 uppercase">כותרת *</label>
@@ -437,7 +444,11 @@ const CalendarPage: React.FC = () => {
               <label className="text-xs font-black text-slate-400 uppercase">לקוח / איש קשר</label>
               <select value={meetingForm.contactId || ''} onChange={e => setMeetingForm({...meetingForm, contactId: e.target.value || undefined})} className="w-full bg-slate-50 rounded-2xl px-4 py-3 border-2 focus:border-purple-400 outline-none font-medium">
                 <option value="">בחר איש קשר...</option>
-                {globalContacts.filter(c => !meetingForm.projectId || c.projectId === meetingForm.projectId || c.projectId === 'all').map(c => (
+                {globalContacts.filter(c => {
+                  const ids = c.projectIds?.length ? c.projectIds : (c.projectId ? [c.projectId] : []);
+                  if (!meetingForm.projectId) return true;
+                  return ids.includes('all') || ids.includes(meetingForm.projectId);
+                }).map(c => (
                   <option key={c.id} value={c.id}>{c.name} ({c.title})</option>
                 ))}
               </select>
@@ -451,7 +462,7 @@ const CalendarPage: React.FC = () => {
             <button type="submit" className="px-8 py-3 rounded-2xl font-black bg-gradient-to-r from-purple-600 to-purple-700 text-white shadow-lg hover:shadow-xl transition-all">
               {editingMeetingId ? '✅ עדכן' : '💾 שמור'} פגישה
             </button>
-            {editingMeetingId && (
+            {editingMeetingId && canManageMeetings && (
               <button type="button" onClick={() => { deleteMeeting(editingMeetingId); setMeetingModalOpen(false); }} className="px-8 py-3 rounded-2xl font-black bg-red-100 text-red-700 hover:bg-red-200 border-2 border-red-200 transition-all">
                 🗑️ מחק
               </button>
