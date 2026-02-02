@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Project, ProjectStatus, ProjectType, Contact } from '../types.ts';
+import { Project, ProjectStatus, ProjectType, Contact, UserRole } from '../types.ts';
 import { useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal.tsx';
 // Fix: Correct import path for useData hook
