@@ -99,20 +99,22 @@ const TasksPage: React.FC = () => {
         hasIssue: false
       });
     }
-    setTemplateTaskId('');
-    setTemplateSelected(false);
-    setSelectedSuggestionIndex(-1);
-    setDraftSubtasks([]);
-    setSubtaskDraft({
-      name: '',
-      plannedStartDate: editingTask?.plannedStartDate || TODAY_STR,
-      plannedEndDate: editingTask?.plannedEndDate || TODAY_STR,
-      status: TaskStatus.NOT_STARTED,
-      performerContactId: undefined
-    });
-    setEditingSubtaskId(null);
-    setEditingDraftSubtaskId(null);
-  }, [editingTask, projects, isModalOpen]);
+    // רק אם לא בחרנו טמפלט, אתחול את הדברים
+    if (!templateSelected) {
+      setTemplateTaskId('');
+      setSelectedSuggestionIndex(-1);
+      setDraftSubtasks([]);
+      setSubtaskDraft({
+        name: '',
+        plannedStartDate: editingTask?.plannedStartDate || TODAY_STR,
+        plannedEndDate: editingTask?.plannedEndDate || TODAY_STR,
+        status: TaskStatus.NOT_STARTED,
+        performerContactId: undefined
+      });
+      setEditingSubtaskId(null);
+      setEditingDraftSubtaskId(null);
+    }
+  }, [editingTask, projects, isModalOpen, templateSelected]);
 
   const applyTemplateTask = (taskId: string) => {
     const template = tasks.find(t => t.id === taskId);
@@ -276,6 +278,8 @@ const TasksPage: React.FC = () => {
       }
     }
     setModalOpen(false);
+    setTemplateSelected(false);
+    setTemplateTaskId('');
   };
 
   const existingSubtasks = useMemo(() => {
@@ -528,7 +532,8 @@ const TasksPage: React.FC = () => {
                     onChange={e => {
                       const nextValue = e.target.value;
                       setModalData({ ...modalData, name: nextValue });
-                      if (templateTaskId) {
+                      // רק אם עדיין בשלב הראשון (templateSelected = false), ניתן לנקות את templateTaskId
+                      if (templateTaskId && !templateSelected) {
                         const template = tasks.find(t => t.id === templateTaskId);
                         if (template && nextValue !== template.name) {
                           setTemplateTaskId('');
@@ -608,7 +613,7 @@ const TasksPage: React.FC = () => {
                     onClick={() => {
                       setTemplateSelected(false);
                       setTemplateTaskId('');
-                      setModalData({ name: '', ...modalData, name: '' });
+                      setSelectedSuggestionIndex(-1);
                     }}
                     className="px-4 py-3 bg-slate-200 text-slate-700 rounded-2xl font-black text-sm hover:bg-slate-300 transition-colors whitespace-nowrap"
                     title="בחר משימה אחרת"
@@ -620,6 +625,11 @@ const TasksPage: React.FC = () => {
               {!templateSelected && (
                 <p className="text-[10px] text-slate-400">
                   התחל להקליד לחפש משימה קיימת, בחר בכפתור "✓ בחר" וכל הנתונים יטענו אוטומטית.
+                </p>
+              )}
+              {templateSelected && (
+                <p className="text-[10px] text-slate-400 bg-blue-50 p-2 rounded">
+                  ✓ טמפלט נטען בהצלחה! כעת תוכל לשנות כל שדה לפי צורך. לחץ "בחר אחרת" לבחירת משימה אחרת.
                 </p>
               )}
             </div>
@@ -638,9 +648,19 @@ const TasksPage: React.FC = () => {
 
             <div className="space-y-1">
               <label className="text-xs font-black text-slate-400 uppercase">קטגוריה</label>
-              <select value={modalData.category || ''} onChange={e => setModalData({...modalData, category: e.target.value as TaskCategory})} className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none">
-                {Object.values(TaskCategory).map(v => <option key={v} value={v}>{v}</option>)}
-              </select>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={modalData.category || ''}
+                  onChange={e => setModalData({...modalData, category: e.target.value as TaskCategory})}
+                  list="category-list"
+                  className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500"
+                  placeholder="בחר קטגוריה או כתוב חדשה..."
+                />
+                <datalist id="category-list">
+                  {Object.values(TaskCategory).map(v => <option key={v} value={v}>{v}</option>)}
+                </datalist>
+              </div>
             </div>
 
             <div className="space-y-1">
