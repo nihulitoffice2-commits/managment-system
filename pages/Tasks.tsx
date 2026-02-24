@@ -34,6 +34,8 @@ const TasksPage: React.FC = () => {
   });
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
   const [editingDraftSubtaskId, setEditingDraftSubtaskId] = useState<string | null>(null);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState<number>(-1);
+  const [templateSelected, setTemplateSelected] = useState(false);
 
   const isSysAdmin = currentUser?.role === UserRole.SYS_ADMIN;
   const isPmAdmin = currentUser?.role === UserRole.PM_ADMIN;
@@ -98,6 +100,8 @@ const TasksPage: React.FC = () => {
       });
     }
     setTemplateTaskId('');
+    setTemplateSelected(false);
+    setSelectedSuggestionIndex(-1);
     setDraftSubtasks([]);
     setSubtaskDraft({
       name: '',
@@ -516,43 +520,106 @@ const TasksPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="md:col-span-2 space-y-1">
               <label className="text-xs font-black text-slate-400 uppercase">שם המשימה *</label>
-              <div className="relative">
-                <input
-                  required
-                  value={modalData.name || ''}
-                  onChange={e => {
-                    const nextValue = e.target.value;
-                    setModalData({ ...modalData, name: nextValue });
-                    if (templateTaskId) {
-                      const template = tasks.find(t => t.id === templateTaskId);
-                      if (template && nextValue !== template.name) {
-                        setTemplateTaskId('');
-                        setDraftSubtasks([]);
+              {!templateSelected ? (
+                <div className="relative">
+                  <input
+                    required
+                    value={modalData.name || ''}
+                    onChange={e => {
+                      const nextValue = e.target.value;
+                      setModalData({ ...modalData, name: nextValue });
+                      if (templateTaskId) {
+                        const template = tasks.find(t => t.id === templateTaskId);
+                        if (template && nextValue !== template.name) {
+                          setTemplateTaskId('');
+                          setDraftSubtasks([]);
+                        }
                       }
-                    }
-                  }}
-                  className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500"
-                  placeholder="התחל להקליד... אפשר גם לשכפל ממשימה קיימת"
-                />
-                {!editingTask && templateSuggestions.length > 0 && (
-                  <div className="absolute z-20 mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
-                    {templateSuggestions.map(t => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => applyTemplateTask(t.id)}
-                        className="w-full text-right px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center justify-between"
-                      >
-                        <span className="font-bold text-slate-800">{t.name}</span>
-                        <span className="text-[10px] text-slate-500">{projects.find(p => p.id === t.projectId)?.name || 'ללא פרויקט'}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {!editingTask && (
+                      setSelectedSuggestionIndex(-1);
+                    }}
+                    onKeyDown={(e) => {
+                      if (!templateSuggestions.length) return;
+                      
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setSelectedSuggestionIndex(prev => 
+                          prev < templateSuggestions.length - 1 ? prev + 1 : prev
+                        );
+                      } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setSelectedSuggestionIndex(prev => prev > 0 ? prev - 1 : -1);
+                      } else if (e.key === 'Enter' && selectedSuggestionIndex >= 0) {
+                        e.preventDefault();
+                        const selected = templateSuggestions[selectedSuggestionIndex];
+                        applyTemplateTask(selected.id);
+                        setTemplateSelected(true);
+                        setSelectedSuggestionIndex(-1);
+                      }
+                    }}
+                    className="w-full border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500"
+                    placeholder="התחל להקליד... אפשר גם לשכפל ממשימה קיימת"
+                  />
+                  {templateSuggestions.length > 0 && (
+                    <div className="absolute z-20 mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+                      {templateSuggestions.map((t, idx) => (
+                        <div
+                          key={t.id}
+                          onMouseEnter={() => setSelectedSuggestionIndex(idx)}
+                          className={`w-full text-right px-4 py-2.5 text-sm flex items-center justify-between transition-colors border-b last:border-b-0 ${
+                            selectedSuggestionIndex === idx 
+                              ? 'bg-blue-100' 
+                              : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                applyTemplateTask(t.id);
+                                setTemplateSelected(true);
+                                setSelectedSuggestionIndex(-1);
+                              }}
+                              className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
+                              title="בחר משימה זו וטען את כל הנתונים"
+                            >
+                              ✓ בחר
+                            </button>
+                          </div>
+                          <div className="flex-1 text-right mr-2">
+                            <span className="font-bold text-slate-800">{t.name}</span>
+                            <span className="text-[10px] text-slate-500 mr-2">{projects.find(p => p.id === t.projectId)?.name || 'ללא פרויקט'}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    required
+                    value={modalData.name || ''}
+                    onChange={e => setModalData({ ...modalData, name: e.target.value })}
+                    className="flex-1 border-slate-200 bg-slate-50 rounded-2xl px-4 py-3 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500"
+                    placeholder="שם המשימה"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTemplateSelected(false);
+                      setTemplateTaskId('');
+                      setModalData({ name: '', ...modalData, name: '' });
+                    }}
+                    className="px-4 py-3 bg-slate-200 text-slate-700 rounded-2xl font-black text-sm hover:bg-slate-300 transition-colors whitespace-nowrap"
+                    title="בחר משימה אחרת"
+                  >
+                    ✕ בחר אחרת
+                  </button>
+                </div>
+              )}
+              {!templateSelected && (
                 <p className="text-[10px] text-slate-400">
-                  אפשר להקליד שם חדש, או לבחור מהרשימה לשכפול מלא כולל תתי־משימות.
+                  התחל להקליד לחפש משימה קיימת, בחר בכפתור "✓ בחר" וכל הנתונים יטענו אוטומטית.
                 </p>
               )}
             </div>
